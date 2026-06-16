@@ -1,13 +1,11 @@
-/**
- * Bot — abstract superclass for all enemy bots.
- *
- * Handles:
- *   - Position and size storage
- *   - Player collision detection (AABB)
- *   - Wall-checking utility for subclasses
- *
- * Subclasses must implement update(MazeMap map).
- */
+
+//Bot — abstract superclass for all enemy bots.
+//Handles:
+//Position and size storage
+// Player collision detection (AABB)
+// Wall-checking utility for subclasses
+//Subclasses must implement update(MazeMap map).
+
 public abstract class Bot {
 
     protected Position position;
@@ -18,10 +16,10 @@ public abstract class Bot {
         this.size = size;
     }
 
-    /** Called every frame. Subclasses define their movement logic. */
+    // Called every frame. Subclasses define their movement logic.
     public abstract void update(MazeMap map);
 
-    /** AABB collision check against the player. */
+    // AABB collision check against the player.
     public boolean collidesWith(Player player) {
         Position pp = player.getPosition();
         Size ps = player.getSize();
@@ -31,7 +29,7 @@ public abstract class Bot {
                 && position.Y() + size.height() > pp.Y();
     }
 
-    /** Returns true if the given grid cell is passable (not a wall). */
+    // Returns true if the given grid cell is passable (not a wall).
     protected boolean canMoveTo(int x, int y, MazeMap map) {
         return !map.isWall(x, y);
     }

@@ -1,7 +1,5 @@
-/**
- * Represents a numbered key item on the map.
- * Keys must be deposited in ascending order (1, 2, 3...) to unlock the door.
- */
+//Represents a numbered key item on the map Keys must be deposited in ascending order (1, 2, 3...) to unlock the door
+
 public class KeyItem {
     private int number;       // The key's number (1-6)
     private Position position; // Where it is on the map

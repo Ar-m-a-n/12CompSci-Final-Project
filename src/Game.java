@@ -10,9 +10,8 @@ public class Game {
     private MazeMap mazeMap;
     private Player player;
 
-    // Multiple bots — mix of PatrolBots and WandererBots
+    // Six PatrolBots — snake-pattern paths covering ~82 % of the maze
     private ArrayList<Bot> bots;
-    // Colors per bot (parallel list)
     private ArrayList<Color> botColors;
 
     private ArrayList<KeyItem> keys;
@@ -25,37 +24,46 @@ public class Game {
     private int playerMoveTimer = 0;
     private int playerMoveDelay = 3;
 
-    private int invincibleTimer = 0;
+    private int invincibleTimer    = 0;
     private int invincibleDuration = 25;
 
     private boolean ePressedLastFrame = false;
 
     public Game() {
         boundary = new Boundary(32, 32);
-        mazeMap = new MazeMap();
+        mazeMap  = new MazeMap();
 
         player = new Player(new Position(1, 1), new Size(1, 1));
 
-        // ---- Build bots (all PatrolBots, step one cell at a time) ----
-        bots = new ArrayList<>();
+        // Six snake-pattern bots
+        bots      = new ArrayList<>();
         botColors = new ArrayList<>();
 
-        bots.add(new PatrolBot(new Position(1, 1),   new Size(1, 1), 3, PatrolBot.buildTopPath()));
+        //Bot 1 top section (rows 1,3,5,7,9), fast
+        bots.add(new PatrolBot(new Position(1, 1),  new Size(1, 1), 2, PatrolBot.buildPath1()));
         botColors.add(Color.RED);
 
-        bots.add(new PatrolBot(new Position(1, 15),  new Size(1, 1), 3, PatrolBot.buildLeftPath()));
-        botColors.add(new Color(255, 140, 0));
+        //Bot 2 upper-mid (rows 11,13,15,17)
+        bots.add(new PatrolBot(new Position(1, 11), new Size(1, 1), 3, PatrolBot.buildPath2()));
+        botColors.add(Color.RED);
 
-        bots.add(new PatrolBot(new Position(30, 8),  new Size(1, 1), 3, PatrolBot.buildRightPath()));
-        botColors.add(new Color(220, 0, 220));
+        //Bot 3 lower-mid (rows 19,21,23,25)
+        bots.add(new PatrolBot(new Position(1, 19), new Size(1, 1), 3, PatrolBot.buildPath3()));
+        botColors.add(Color.RED);
 
-        bots.add(new PatrolBot(new Position(15, 17), new Size(1, 1), 4, PatrolBot.buildMiddlePath()));
-        botColors.add(new Color(0, 180, 255));
+        //Bot 4 bottom (rows 27,29,30)
+        bots.add(new PatrolBot(new Position(1, 27), new Size(1, 1), 2, PatrolBot.buildPath4()));
+        botColors.add(Color.RED);
 
-        bots.add(new PatrolBot(new Position(15, 30), new Size(1, 1), 3, PatrolBot.buildBottomPath()));
-        botColors.add(new Color(80, 220, 80));
+        //Bot 5 left column x=1
+        bots.add(new PatrolBot(new Position(1, 1),  new Size(1, 1), 2, PatrolBot.buildPath5()));
+        botColors.add(Color.RED);
 
-        // ---- Keys ----
+        //Bot 6 right column x=30
+        bots.add(new PatrolBot(new Position(30, 1), new Size(1, 1), 2, PatrolBot.buildPath6()));
+        botColors.add(Color.RED);
+
+        //Keys
         keys = new ArrayList<>();
         keys.add(new KeyItem(1, new Position(1,  3)));
         keys.add(new KeyItem(2, new Position(30, 3)));
@@ -70,7 +78,8 @@ public class Game {
         gameWon      = false;
         gameOver     = false;
 
-        canvas = new GridCanvas(boundary, 20, "House Maze — Sort the Keys!");
+        //Smaller window: 14 px per cell
+        canvas = new GridCanvas(boundary, 14, "House Maze — Sort the Keys!");
         canvas.showInWindow();
     }
 
@@ -92,7 +101,7 @@ public class Game {
         inputState = canvas.getInputState();
         inventory.tickFeedback();
 
-        // Player movement
+        //Player movement
         playerMoveTimer++;
         if (playerMoveTimer >= playerMoveDelay) {
             playerMoveTimer = 0;
@@ -102,7 +111,7 @@ public class Game {
         int px = player.getPosition().X();
         int py = player.getPosition().Y();
 
-        // Key pickups
+        //Key pickups
         for (KeyItem key : keys) {
             if (!key.isCollected()
                     && key.getPosition().X() == px
@@ -112,7 +121,7 @@ public class Game {
             }
         }
 
-        // Deposit slot — press E
+        //Deposit slot  press E
         boolean eNow = inputState.isEPressed();
         if (mazeMap.isDeposit(px, py) && eNow && !ePressedLastFrame) {
             KeyInventory.DepositResult result = inventory.tryDeposit();
@@ -125,16 +134,14 @@ public class Game {
         }
         ePressedLastFrame = eNow;
 
-        // Door entry
+        //Door entry
         if (doorUnlocked && mazeMap.isDoor(px, py)) {
             gameWon = true;
             return;
         }
 
-        // Update all bots and check collisions
-        if (invincibleTimer > 0) {
-            invincibleTimer--;
-        }
+        //Update all bots and check collisions
+        if (invincibleTimer > 0) invincibleTimer--;
 
         for (Bot bot : bots) {
             bot.update(mazeMap);
@@ -156,7 +163,7 @@ public class Game {
     private void redrawVisuals() {
         canvas.clear();
 
-        // Maze
+        //Maze
         int[][] grid = mazeMap.getGrid();
         for (int y = 0; y < 32; y++) {
             for (int x = 0; x < 32; x++) {
@@ -174,7 +181,7 @@ public class Game {
             }
         }
 
-        // Keys
+        //Keys
         for (KeyItem key : keys) {
             if (!key.isCollected()) {
                 canvas.drawOval(key.getPosition(), new Size(1, 1),
@@ -182,18 +189,18 @@ public class Game {
             }
         }
 
-        // Player
+        //Player (flickers while invincible)
         boolean showPlayer = (invincibleTimer == 0) || (invincibleTimer % 4 < 2);
         if (showPlayer) {
             canvas.drawRectangle(player.getPosition(), player.getSize(),
                     Color.CYAN, GridCanvas.DrawStyle.FILLED);
         }
 
-        // All bots with their individual colors
+        //Bots with individual colors
         for (int i = 0; i < bots.size(); i++) {
             Bot bot = bots.get(i);
-            Color c = botColors.get(i);
-            canvas.drawOval(bot.getPosition(), bot.getSize(), c, GridCanvas.DrawStyle.FILLED);
+            canvas.drawOval(bot.getPosition(), bot.getSize(),
+                    botColors.get(i), GridCanvas.DrawStyle.FILLED);
         }
 
         drawHUD();
