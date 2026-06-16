@@ -1,3 +1,5 @@
+//Eknoor
+
 public class MazeMap {
 
     public static final int OPEN    = 0;
