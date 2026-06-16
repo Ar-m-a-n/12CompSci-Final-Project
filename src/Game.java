@@ -9,39 +9,68 @@ public class Game {
 
     private MazeMap mazeMap;
     private Player player;
-    private Bot bot;
 
-    private int totalKeys;
-    private int keysCollected;
+    // Multiple bots — mix of PatrolBots and WandererBots
+    private ArrayList<Bot> bots;
+    // Colors per bot (parallel list)
+    private ArrayList<Color> botColors;
+
+    private ArrayList<KeyItem> keys;
+    private KeyInventory inventory;
+
     private boolean doorUnlocked;
     private boolean gameWon;
     private boolean gameOver;
 
-    // Controls how often the player moves (in frames)
     private int playerMoveTimer = 0;
     private int playerMoveDelay = 3;
 
-    // Invincibility frames after getting hit
     private int invincibleTimer = 0;
-    private int invincibleDuration = 20;
+    private int invincibleDuration = 25;
+
+    private boolean ePressedLastFrame = false;
 
     public Game() {
         boundary = new Boundary(32, 32);
         mazeMap = new MazeMap();
 
-        // Player spawns at top-left open area
         player = new Player(new Position(1, 1), new Size(1, 1));
 
-        // Bot patrols the maze corridors, moves every 4 frames
-        bot = new Bot(new Position(1, 9), new Size(1, 1), 4);
+        // ---- Build bots (all PatrolBots, step one cell at a time) ----
+        bots = new ArrayList<>();
+        botColors = new ArrayList<>();
 
-        totalKeys = mazeMap.countKeys();
-        keysCollected = 0;
+        bots.add(new PatrolBot(new Position(1, 1),   new Size(1, 1), 3, PatrolBot.buildTopPath()));
+        botColors.add(Color.RED);
+
+        bots.add(new PatrolBot(new Position(1, 15),  new Size(1, 1), 3, PatrolBot.buildLeftPath()));
+        botColors.add(new Color(255, 140, 0));
+
+        bots.add(new PatrolBot(new Position(30, 8),  new Size(1, 1), 3, PatrolBot.buildRightPath()));
+        botColors.add(new Color(220, 0, 220));
+
+        bots.add(new PatrolBot(new Position(15, 17), new Size(1, 1), 4, PatrolBot.buildMiddlePath()));
+        botColors.add(new Color(0, 180, 255));
+
+        bots.add(new PatrolBot(new Position(15, 30), new Size(1, 1), 3, PatrolBot.buildBottomPath()));
+        botColors.add(new Color(80, 220, 80));
+
+        // ---- Keys ----
+        keys = new ArrayList<>();
+        keys.add(new KeyItem(1, new Position(1,  3)));
+        keys.add(new KeyItem(2, new Position(30, 3)));
+        keys.add(new KeyItem(3, new Position(1,  12)));
+        keys.add(new KeyItem(4, new Position(30, 12)));
+        keys.add(new KeyItem(5, new Position(1,  21)));
+        keys.add(new KeyItem(6, new Position(30, 21)));
+
+        inventory = new KeyInventory(keys.size());
+
         doorUnlocked = false;
-        gameWon = false;
-        gameOver = false;
+        gameWon      = false;
+        gameOver     = false;
 
-        canvas = new GridCanvas(boundary, 20, "House Maze - Collect All Keys!");
+        canvas = new GridCanvas(boundary, 20, "House Maze — Sort the Keys!");
         canvas.showInWindow();
     }
 
@@ -50,7 +79,7 @@ public class Game {
             updateGameState();
             redrawVisuals();
             try {
-                Thread.sleep(50); // ~20 FPS
+                Thread.sleep(50);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
@@ -61,131 +90,170 @@ public class Game {
         if (gameOver || gameWon) return;
 
         inputState = canvas.getInputState();
+        inventory.tickFeedback();
 
-        // Player movement with delay (so it's not too fast)
+        // Player movement
         playerMoveTimer++;
         if (playerMoveTimer >= playerMoveDelay) {
             playerMoveTimer = 0;
             movePlayer();
         }
 
-        // Check key pickup
         int px = player.getPosition().X();
         int py = player.getPosition().Y();
-        if (mazeMap.isKey(px, py)) {
-            mazeMap.setCell(px, py, MazeMap.OPEN);
-            keysCollected++;
-            if (keysCollected >= totalKeys) {
-                doorUnlocked = true;
+
+        // Key pickups
+        for (KeyItem key : keys) {
+            if (!key.isCollected()
+                    && key.getPosition().X() == px
+                    && key.getPosition().Y() == py) {
+                key.collect();
+                inventory.pickUp(key.getNumber());
             }
         }
 
-        // Check door
+        // Deposit slot — press E
+        boolean eNow = inputState.isEPressed();
+        if (mazeMap.isDeposit(px, py) && eNow && !ePressedLastFrame) {
+            KeyInventory.DepositResult result = inventory.tryDeposit();
+            if (result == KeyInventory.DepositResult.WRONG && invincibleTimer == 0) {
+                player.loseLife();
+                invincibleTimer = invincibleDuration;
+                if (!player.isAlive()) { gameOver = true; return; }
+            }
+            if (inventory.isDoorUnlocked()) doorUnlocked = true;
+        }
+        ePressedLastFrame = eNow;
+
+        // Door entry
         if (doorUnlocked && mazeMap.isDoor(px, py)) {
             gameWon = true;
             return;
         }
 
-        // Update bot
-        bot.update();
-
-        // Check bot collision (with invincibility frames)
+        // Update all bots and check collisions
         if (invincibleTimer > 0) {
             invincibleTimer--;
-        } else if (bot.collidesWith(player)) {
-            player.loseLife();
-            invincibleTimer = invincibleDuration;
-            if (!player.isAlive()) {
-                gameOver = true;
+        }
+
+        for (Bot bot : bots) {
+            bot.update(mazeMap);
+            if (invincibleTimer == 0 && bot.collidesWith(player)) {
+                player.loseLife();
+                invincibleTimer = invincibleDuration;
+                if (!player.isAlive()) { gameOver = true; return; }
             }
         }
     }
 
     private void movePlayer() {
-        if (inputState.isLeftPressed()) {
-            player.moveLeft(boundary, mazeMap);
-        }
-        if (inputState.isRightPressed()) {
-            player.moveRight(boundary, mazeMap);
-        }
-        if (inputState.isUpPressed()) {
-            player.moveUp(boundary, mazeMap);
-        }
-        if (inputState.isDownPressed()) {
-            player.moveDown(boundary, mazeMap);
-        }
+        if (inputState.isLeftPressed())  player.moveLeft(boundary, mazeMap);
+        if (inputState.isRightPressed()) player.moveRight(boundary, mazeMap);
+        if (inputState.isUpPressed())    player.moveUp(boundary, mazeMap);
+        if (inputState.isDownPressed())  player.moveDown(boundary, mazeMap);
     }
 
     private void redrawVisuals() {
         canvas.clear();
 
-        // Draw maze
+        // Maze
         int[][] grid = mazeMap.getGrid();
         for (int y = 0; y < 32; y++) {
             for (int x = 0; x < 32; x++) {
                 int cell = grid[y][x];
                 if (cell == MazeMap.WALL) {
-                    canvas.drawRectangle(new Position(x, y), new Size(1, 1), new Color(60, 60, 120), GridCanvas.DrawStyle.FILLED);
-                } else if (cell == MazeMap.KEY) {
-                    canvas.drawOval(new Position(x, y), new Size(1, 1), new Color(255, 215, 0), GridCanvas.DrawStyle.FILLED);
+                    canvas.drawRectangle(new Position(x, y), new Size(1, 1),
+                            new Color(50, 50, 110), GridCanvas.DrawStyle.FILLED);
                 } else if (cell == MazeMap.DOOR) {
-                    Color doorColor = doorUnlocked ? new Color(0, 200, 80) : new Color(180, 50, 50);
-                    canvas.drawRectangle(new Position(x, y), new Size(1, 1), doorColor, GridCanvas.DrawStyle.FILLED);
+                    Color dc = doorUnlocked ? new Color(0, 210, 90) : new Color(160, 40, 40);
+                    canvas.drawRectangle(new Position(x, y), new Size(1, 1), dc, GridCanvas.DrawStyle.FILLED);
+                } else if (cell == MazeMap.DEPOSIT) {
+                    canvas.drawRectangle(new Position(x, y), new Size(1, 1),
+                            new Color(160, 80, 220), GridCanvas.DrawStyle.FILLED);
                 }
             }
         }
 
-        // Draw player (flash when invincible)
-        boolean showPlayer = (invincibleTimer == 0) || (invincibleTimer % 4 < 2);
-        if (showPlayer) {
-            canvas.drawRectangle(player.getPosition(), player.getSize(), Color.CYAN, GridCanvas.DrawStyle.FILLED);
+        // Keys
+        for (KeyItem key : keys) {
+            if (!key.isCollected()) {
+                canvas.drawOval(key.getPosition(), new Size(1, 1),
+                        new Color(255, 210, 0), GridCanvas.DrawStyle.FILLED);
+            }
         }
 
-        // Draw bot
-        canvas.drawOval(bot.getPosition(), bot.getSize(), Color.RED, GridCanvas.DrawStyle.FILLED);
+        // Player
+        boolean showPlayer = (invincibleTimer == 0) || (invincibleTimer % 4 < 2);
+        if (showPlayer) {
+            canvas.drawRectangle(player.getPosition(), player.getSize(),
+                    Color.CYAN, GridCanvas.DrawStyle.FILLED);
+        }
 
-        // Draw HUD: lives and keys
+        // All bots with their individual colors
+        for (int i = 0; i < bots.size(); i++) {
+            Bot bot = bots.get(i);
+            Color c = botColors.get(i);
+            canvas.drawOval(bot.getPosition(), bot.getSize(), c, GridCanvas.DrawStyle.FILLED);
+        }
+
         drawHUD();
+        drawDepositFeedback();
 
-        // Draw overlay if won or game over
         if (gameWon) {
-            drawOverlay("YOU ESCAPED! YOU WIN!", new Color(0, 200, 80, 180));
+            drawOverlay(new Color(0, 180, 80, 200));
         } else if (gameOver) {
-            drawOverlay("GAME OVER - No Lives Left!", new Color(200, 0, 0, 180));
+            drawOverlay(new Color(180, 0, 0, 200));
         }
 
         canvas.redraw();
     }
 
-    /**
-     * Draws life hearts and key count as colored blocks in corners.
-     */
     private void drawHUD() {
-        // Lives: red squares top-right corner (each = 1 life)
+        for (int i = 0; i < inventory.getTotalKeys(); i++) {
+            int keyNum = i + 1;
+            boolean deposited = inventory.getDeposited().contains(keyNum);
+            boolean inHand    = inventory.getInHand().contains(keyNum);
+            Color c;
+            GridCanvas.DrawStyle style;
+            if (deposited) {
+                c = new Color(255, 210, 0); style = GridCanvas.DrawStyle.FILLED;
+            } else if (inHand) {
+                c = new Color(200, 160, 0); style = GridCanvas.DrawStyle.OUTLINED;
+            } else {
+                c = new Color(80, 70, 30);  style = GridCanvas.DrawStyle.OUTLINED;
+            }
+            canvas.drawOval(new Position(i * 2 + 1, 0), new Size(1, 1), c, style);
+        }
+
         for (int i = 0; i < player.getLives(); i++) {
-            canvas.drawRectangle(new Position(29 - i, 0), new Size(1, 1), Color.RED, GridCanvas.DrawStyle.FILLED);
+            canvas.drawRectangle(new Position(29 - i, 0), new Size(1, 1),
+                    Color.RED, GridCanvas.DrawStyle.FILLED);
         }
 
-        // Keys collected: yellow ovals along top-left
-        for (int i = 0; i < keysCollected; i++) {
-            canvas.drawOval(new Position(i, 0), new Size(1, 1), new Color(255, 215, 0), GridCanvas.DrawStyle.FILLED);
-        }
-
-        // Remaining keys: dark gold outlines
-        for (int i = keysCollected; i < totalKeys; i++) {
-            canvas.drawOval(new Position(i, 0), new Size(1, 1), new Color(100, 80, 0), GridCanvas.DrawStyle.OUTLINED);
+        int next = inventory.getNextExpected();
+        if (next <= inventory.getTotalKeys()) {
+            canvas.drawOval(new Position(14, 0), new Size(1, 1),
+                    Color.CYAN, GridCanvas.DrawStyle.OUTLINED);
         }
     }
 
-    /**
-     * Draws a colored overlay rectangle as a banner across the middle.
-     */
-    private void drawOverlay(String message, Color color) {
-        // Draw banner rows
-        for (int y = 13; y <= 18; y++) {
-            for (int x = 0; x < 32; x++) {
-                canvas.drawRectangle(new Position(x, y), new Size(1, 1), color, GridCanvas.DrawStyle.FILLED);
-            }
+    private void drawDepositFeedback() {
+        if (inventory.getFeedbackTimer() <= 0) return;
+        KeyInventory.DepositResult result = inventory.getLastResult();
+        Color flash;
+        if      (result == KeyInventory.DepositResult.SUCCESS) flash = new Color(0, 255, 100, 160);
+        else if (result == KeyInventory.DepositResult.WRONG)   flash = new Color(255, 50,  50,  160);
+        else return;
+        for (int dx = -1; dx <= 1; dx++) {
+            canvas.drawRectangle(new Position(17 + dx, 30), new Size(1, 1),
+                    flash, GridCanvas.DrawStyle.FILLED);
         }
+    }
+
+    private void drawOverlay(Color color) {
+        for (int y = 13; y <= 18; y++)
+            for (int x = 2; x <= 29; x++)
+                canvas.drawRectangle(new Position(x, y), new Size(1, 1),
+                        color, GridCanvas.DrawStyle.FILLED);
     }
 }
